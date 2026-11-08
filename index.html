@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smart Parking AI</title>
+<style>
+:root{--bg:#0d1420;--card:#16202f;--line:#25344a;--tx:#e8eef7;--mu:#8aa0bb;--ok:#34d399;--bad:#f87171;--warn:#fbbf24;--ac:#38bdf8}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px system-ui,sans-serif;padding:16px;max-width:1100px;margin:auto}
+h1{font-size:20px;margin:0 0 10px}h2{font-size:13px;color:var(--mu);text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+.chip{font-size:12px;padding:4px 10px;border-radius:99px;border:1px solid var(--line);color:var(--mu)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}.chip.bad{color:var(--bad);border-color:var(--bad)}.chip.warn{color:var(--warn);border-color:var(--warn)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}.stat{text-align:center}.stat b{font-size:30px;display:block}.stat span{color:var(--mu);font-size:12px}
+button{background:#1e2c42;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}button:hover{border-color:var(--ac)}button.p{background:var(--ac);color:#04121c;border:0;font-weight:600}
+input[type=text]{flex:1;min-width:180px;background:#0f1927;border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:8px}
+.lot{display:flex;align-items:center;justify-content:space-around;gap:6px;padding:10px 0}
+.gate{text-align:center;font-size:12px;color:var(--mu)}.gate b{display:block;margin-top:8px;color:var(--tx)}
+.bar{width:64px;height:7px;margin:14px auto 0;border-radius:4px;transform-origin:left center;transition:transform .5s;background:repeating-linear-gradient(90deg,#f87171 0 8px,#fff 8px 16px)}.bar.open{transform:rotate(-70deg)}
+.slots{display:flex;gap:10px}.slot{width:84px;height:104px;border:2px dashed var(--line);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.slot i{font-style:normal;font-weight:700;color:var(--mu)}.slot .car{font-size:30px;height:36px}.slot.occ{border:2px solid var(--bad);background:#2a1519}.slot.free{border:2px solid var(--ok)}
+#cam{width:100%;aspect-ratio:4/3;background:#000;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:var(--mu)}#cam canvas{width:100%;height:100%}
+.pr{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:13px}.pr .t{flex:1;height:8px;background:#0f1927;border-radius:4px;overflow:hidden}.pr .t div{height:100%;background:var(--ac);width:0}.pr span{width:42px;text-align:right}
+.det{font-weight:600;padding:6px 10px;border-radius:8px;display:inline-block;margin:8px 0}.det.y{background:#12301f;color:var(--ok)}.det.n{background:#1e2c42;color:var(--mu)}
+#logs{max-height:260px;overflow:auto;font-size:13px}.lg{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)}.lg time{color:var(--mu);width:84px;flex:none}.lg em{font-style:normal;width:64px;flex:none;color:var(--ac)}
+small{color:var(--mu)}
+</style>
+</head>
+<body>
+<h1>Smart Parking AI</h1>
+<div class="row">
+  <span class="chip" id="cDb">Firebase: menghubungkan...</span>
+  <span class="chip" id="cEsp">ESP32: menunggu</span>
+  <span class="chip" id="cBt">micro:bit: belum tersambung</span>
+  <span class="chip" id="cAi">AI: belum aktif</span>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Monitoring Parkir</h2>
+    <div class="stats">
+      <div class="stat"><b id="nTot">-</b><span>Total slot</span></div>
+      <div class="stat"><b id="nAv" style="color:var(--ok)">-</b><span>Tersedia</span></div>
+      <div class="stat"><b id="nOc" style="color:var(--bad)">-</b><span>Terisi</span></div>
+    </div>
+    <div class="lot">
+      <div class="gate">GATE IN (micro:bit)<div class="bar" id="barIn"></div><b id="stIn">-</b></div>
+      <div class="slots">
+        <div class="slot" id="sA"><i>A</i><div class="car"></div><small id="tA">-</small></div>
+        <div class="slot" id="sB"><i>B</i><div class="car"></div><small id="tB">-</small></div>
+      </div>
+      <div class="gate">GATE OUT (ESP32)<div class="bar" id="barOut"></div><b id="stOut">-</b></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="bBt" class="p">Sambungkan micro:bit</button>
+      <button id="bOpen">Buka Gate IN</button>
+      <button id="bClose">Tutup Gate IN</button>
+    </div>
+    <small>Gate OUT & slot berjalan otomatis di ESP32 (sensor IR); website hanya memantau.</small>
+  </div>
+
+  <div class="card">
+    <h2>AI Car Detection (Teachable Machine)</h2>
+    <div class="row" style="margin-bottom:8px">
+      <input type="text" id="mu" value="https://teachablemachine.withgoogle.com/models/Mq4Ey6k-y/">
+      <button id="bAi" class="p">Aktifkan Kamera</button>
+    </div>
+    <div id="cam">Kamera belum aktif</div>
+    <div id="det" class="det n">Menunggu AI...</div>
+    <div id="bars"></div>
+    <div class="row" style="margin-top:6px">
+      <label><input type="checkbox" id="auto" checked> Gate IN otomatis</label>
+      <label>Ambang <input type="range" id="th" min="50" max="99" value="85"> <b id="thv">85</b>%</label>
+    </div>
+    <small>Centang label yang berarti "ada mobil". Gate terbuka jika mobil terdeteksi stabil ±1,2 detik dan slot masih tersedia.</small>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px">
+  <div class="row" style="justify-content:space-between"><h2 style="margin:0">Activity Log</h2><button id="bClr">Hapus log</button></div>
+  <div id="logs"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+<script>
+const DB="https://parkir-pintar-8b8ed-default-rtdb.asia-southeast1.firebasedatabase.app/";
+const OPEN_MS=4000, HOLD_MS=1200;
+const $=id=>document.getElementById(id);
+const chip=(id,c,t)=>{const e=$(id);e.className="chip "+c;e.textContent=t};
+
+/* ---------- Firebase (REST + streaming) ---------- */
+let db={};
+const fb=(p,m,b)=>fetch(DB+p+".json",{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined}).catch(()=>{});
+const setGate=s=>fb("parking","PATCH",{gateIn:{status:s,updated:Date.now()}});
+const addLog=(src,ev)=>fb("logs/"+src+"_"+Date.now()+"_"+Math.floor(Math.random()*9999),"PUT",{time:Date.now(),source:src,event:ev});
+function apply(path,data,merge){
+  const parts=path.split("/").filter(Boolean);
+  if(!parts.length){if(merge){for(const k in data){data[k]===null?delete db[k]:db[k]=data[k]}}else db=data||{};return}
+  let n=db;
+  for(let i=0;i<parts.length-1;i++){if(!n[parts[i]]||typeof n[parts[i]]!=="object")n[parts[i]]={};n=n[parts[i]]}
+  const l=parts[parts.length-1];
+  if(merge){if(!n[l]||typeof n[l]!=="object")n[l]={};for(const k in data){data[k]===null?delete n[l][k]:n[l][k]=data[k]}}
+  else data===null?delete n[l]:n[l]=data;
+}
+const es=new EventSource(DB+".json");
+es.onopen=()=>chip("cDb","ok","Firebase: terhubung");
+es.onerror=()=>chip("cDb","bad","Firebase: terputus, mencoba lagi...");
+["put","patch"].forEach(t=>es.addEventListener(t,e=>{const d=JSON.parse(e.data);apply(d.path,d.data,t==="patch");render()}));
+
+/* ---------- Render ---------- */
+let seen=new Set(),order=[],lastSig,espAt=Date.now();
+function render(){
+  const p=db.parking||{};
+  const tot=p.total??2, av=p.available??0;
+  $("nTot").textContent=tot;$("nAv").textContent=av;$("nOc").textContent=Math.max(0,tot-av);
+  [["A",p.slotA],["B",p.slotB]].forEach(([k,s])=>{
+    const o=s&&s.occupied;
+    $("s"+k).className="slot "+(s?(o?"occ":"free"):"");
+    $("s"+k).querySelector(".car").textContent=o?"🚗":"";
+    $("t"+k).textContent=s?(o?"Terisi":"Kosong"):"-";
+  });
+  const gi=(p.gateIn||{}).status||"-",go=(p.gateOut||{}).status||"-";
+  $("stIn").textContent=gi;$("stOut").textContent=go;
+  $("barIn").classList.toggle("open",gi==="terbuka");$("barOut").classList.toggle("open",go==="terbuka");
+  const sig=((p.gateOut||{}).updated)+"|"+((p.slotA||{}).updated);
+  if(sig!==lastSig){lastSig=sig;espAt=Date.now()}
+  const L=db.logs||{};
+  Object.keys(L).filter(k=>!seen.has(k)).sort((a,b)=>(L[a].time||0)-(L[b].time||0)).forEach(k=>{seen.add(k);order.push(k)});
+  order=order.filter(k=>L[k]);
+  $("logs").innerHTML=order.slice(-60).reverse().map(k=>{
+    const l=L[k],t=l.time>1e12?new Date(l.time).toLocaleTimeString("id-ID"):"up "+Math.round(l.time/1000)+"s";
+    return `<div class="lg"><time>${t}</time><em>${esc(l.source)}</em><span>${esc(l.event)}</span></div>`}).join("");
+}
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+setInterval(()=>{const ok=Date.now()-espAt<75000;chip("cEsp",ok?"ok":"warn",ok?"ESP32: online":"ESP32: belum ada update")},5000);
+
+/* ---------- Gate IN logic ---------- */
+let gateOpen=false,gt;
+function tryOpen(r){
+  if(gateOpen)return;
+  const a=(db.parking||{}).available;
+  if(typeof a==="number"&&a<=0){addLog("website","Parkir penuh, Gate IN ditolak ("+r+")");btSend("FULL");return}
+  openGate(r);
+}
+function openGate(r){
+  gateOpen=true;setGate("terbuka");addLog("website","Gate IN dibuka ("+r+")");
+  const viaBt=btSend("OPEN");
+  clearTimeout(gt);gt=setTimeout(()=>closeGate("timer"),viaBt?OPEN_MS+1500:OPEN_MS);
+}
+function closeGate(r){
+  if(!gateOpen)return;
+  gateOpen=false;clearTimeout(gt);setGate("tertutup");addLog("website","Gate IN ditutup");
+  if(r!=="mb")btSend("CLOSE");
+}
+$("bOpen").onclick=()=>openGate("manual");
+$("bClose").onclick=()=>closeGate("manual");
+$("bClr").onclick=()=>{if(confirm("Hapus semua log?")){fb("logs","DELETE");seen.clear();order=[]}};
+
+/* ---------- micro:bit via Web Bluetooth UART ---------- */
+const UART="6e400001-b5a3-f393-a0a9-e50e24dcca9e",RXC="6e400002-b5a3-f393-a0a9-e50e24dcca9e",TXC="6e400003-b5a3-f393-a0a9-e50e24dcca9e";
+let btChar=null,btBuf="";
+function btSend(t){if(!btChar)return false;btChar.writeValue(new TextEncoder().encode(t+"\n")).catch(()=>{});return true}
+$("bBt").onclick=async()=>{
+  if(!navigator.bluetooth){alert("Web Bluetooth tidak didukung. Pakai Chrome/Edge di laptop atau Android.");return}
+  try{
+    const dev=await navigator.bluetooth.requestDevice({filters:[{namePrefix:"BBC micro:bit"}],optionalServices:[UART]});
+    dev.addEventListener("gattserverdisconnected",()=>{btChar=null;chip("cBt","bad","micro:bit: terputus");addLog("microbit","Bluetooth terputus")});
+    const sv=await (await dev.gatt.connect()).getPrimaryService(UART);
+    btChar=await sv.getCharacteristic(RXC);
+    const tx=await sv.getCharacteristic(TXC);
+    await tx.startNotifications();
+    tx.addEventListener("characteristicvaluechanged",e=>{
+      btBuf+=new TextDecoder().decode(e.target.value);let i;
+      while((i=btBuf.indexOf("\n"))>=0){onMb(btBuf.slice(0,i).trim());btBuf=btBuf.slice(i+1)}
+    });
+    chip("cBt","ok","micro:bit: tersambung");addLog("microbit","Bluetooth tersambung");
+  }catch(e){if(e.name!=="NotFoundError")alert("Gagal menyambung: "+e.message)}
+};
+function onMb(m){
+  if(m==="CAR"){
+    addLog("microbit","IR Gate IN mendeteksi objek");
+    if(!$("auto").checked)return;
+    if(!cam||Date.now()-lastCar<3000)tryOpen("IR+AI");
+    else{addLog("website","IR aktif tapi AI tidak melihat mobil");btSend("DENY")}
+  }else if(m==="OPENED"&&!gateOpen){
+    gateOpen=true;setGate("terbuka");addLog("microbit","Gate IN dibuka manual (tombol A)");
+    clearTimeout(gt);gt=setTimeout(()=>closeGate("timer"),OPEN_MS+1500);
+  }else if(m==="CLOSED")closeGate("mb");
+}
+
+/* ---------- Teachable Machine ---------- */
+let model,cam,labels=[],carL=new Set(),lastP=0,lastCar=0,carSince=0,armed=true;
+$("th").oninput=()=>$("thv").textContent=$("th").value;
+$("bAi").onclick=async()=>{
+  const b=$("bAi");b.disabled=true;b.textContent="Memuat model...";
+  try{
+    const u=$("mu").value.trim().replace(/\/?$/,"/");
+    model=await tmImage.load(u+"model.json",u+"metadata.json");
+    labels=model.getClassLabels();
+    labels.forEach(l=>{if(/mobil|car|kendaraan|vehicle|truck|motor/i.test(l)&&!/tidak|bukan|non|kosong|empty|no /i.test(l))carL.add(l)});
+    if(!carL.size)carL.add(labels[0]);
+    $("bars").innerHTML=labels.map((l,i)=>`<div class="pr"><input type="checkbox" data-l="${esc(l)}" ${carL.has(l)?"checked":""}><b style="width:90px">${esc(l)}</b><div class="t"><div id="pb${i}"></div></div><span id="pv${i}">0%</span></div>`).join("");
+    $("bars").querySelectorAll("input").forEach(c=>c.onchange=()=>{c.checked?carL.add(c.dataset.l):carL.delete(c.dataset.l)});
+    cam=new tmImage.Webcam(360,270,true);await cam.setup();await cam.play();
+    $("cam").replaceChildren(cam.canvas);
+    chip("cAi","ok","AI: aktif");addLog("website","Kamera & model Teachable Machine aktif");
+    b.textContent="Kamera aktif";loop();
+  }catch(e){b.disabled=false;b.textContent="Aktifkan Kamera";chip("cAi","bad","AI: gagal");alert("Gagal memuat AI/kamera: "+e.message)}
+};
+async function loop(){
+  cam.update();const now=Date.now();
+  if(now-lastP>150){
+    lastP=now;
+    const pr=await model.predict(cam.canvas);let best=0;
+    pr.forEach((x,i)=>{$("pb"+i).style.width=x.probability*100+"%";$("pv"+i).textContent=Math.round(x.probability*100)+"%";
+      if(carL.has(x.className))best=Math.max(best,x.probability)});
+    const isCar=best>=$("th").value/100;
+    $("det").className="det "+(isCar?"y":"n");$("det").textContent=isCar?"Mobil terdeteksi ("+Math.round(best*100)+"%)":"Tidak ada mobil";
+    if(isCar){
+      lastCar=now;if(!carSince)carSince=now;
+      if(armed&&now-carSince>=HOLD_MS){armed=false;if($("auto").checked)tryOpen("AI")}
+    }else{carSince=0;if(now-lastCar>1500)armed=true}
+  }
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
